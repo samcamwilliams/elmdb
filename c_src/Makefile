@@ -1,5 +1,12 @@
 # Based on c_src.mk from erlang.mk by Loic Hoguin <essen@ninenines.eu>
 
+LMDB_VERSION = 0.9.31
+LMDB_URL = https://github.com/LMDB/lmdb/archive/LMDB_$(LMDB_VERSION).tar.gz
+LMDB_BASE_DIR = lmdb
+LMDB_ARCHIVE = $(LMDB_BASE_DIR)/LMDB_$(LMDB_VERSION).tar.gz
+LMDB_EXTRACTED_DIR = $(LMDB_BASE_DIR)/lmdb-LMDB_$(LMDB_VERSION)
+LMDB_LIB_DIR = $(LMDB_EXTRACTED_DIR)/libraries/liblmdb
+
 CURDIR := $(shell pwd)
 BASEDIR := $(abspath $(CURDIR)/..)
 
@@ -57,6 +64,9 @@ else
     CFLAGS += -fPIC
 endif
 
+# Add LMDB library path
+LMDB_LIB = $(LMDB_LIB_DIR)/liblmdb.a
+
 # Verbosity.
 
 c_verbose_0 = @echo " C     " $(?F);
@@ -68,15 +78,52 @@ cpp_verbose = $(cpp_verbose_$(V))
 link_verbose_0 = @echo " LD    " $(@F);
 link_verbose = $(link_verbose_$(V))
 
-SOURCES := $(shell find $(C_SRC_DIR) -type f \( -name "*.c" -o -name "*.C" -o -name "*.cc" -o -name "*.cpp" \))
-OBJECTS = $(addsuffix .o, $(basename $(SOURCES)))
+# Only compile elmdb_nif.c, not the LMDB sources
+SOURCES := elmdb_nif.c
+OBJECTS = $(SOURCES:.c=.o)
 
 COMPILE_C = $(c_verbose) $(CC) $(CFLAGS) $(CPPFLAGS) -c
 COMPILE_CPP = $(cpp_verbose) $(CXX) $(CXXFLAGS) $(CPPFLAGS) -c
 
-$(C_SRC_OUTPUT): $(OBJECTS)
+.PHONY: all clean
+
+all: $(C_SRC_OUTPUT)
+
+$(C_SRC_OUTPUT): $(OBJECTS) $(LMDB_LIB)
 	@mkdir -p $(BASEDIR)/priv/
-	$(link_verbose) $(CC) $(OBJECTS) $(LDFLAGS) $(LDLIBS) -o $(C_SRC_OUTPUT)
+	$(link_verbose) $(CC) $(OBJECTS) $(LMDB_LIB) $(LDFLAGS) $(LDLIBS) -o $(C_SRC_OUTPUT)
+
+# Download LMDB
+$(LMDB_ARCHIVE):
+	@echo "Downloading LMDB $(LMDB_VERSION)..."
+	@mkdir -p $(LMDB_BASE_DIR)
+	@if command -v curl >/dev/null 2>&1; then \
+		curl -L -o $@ $(LMDB_URL); \
+	elif command -v wget >/dev/null 2>&1; then \
+		wget -O $@ $(LMDB_URL); \
+	else \
+		echo "Error: Neither curl nor wget found. Please install one of them."; \
+		exit 1; \
+	fi
+
+# Extract LMDB
+$(LMDB_EXTRACTED_DIR): $(LMDB_ARCHIVE)
+	@echo "Extracting LMDB..."
+	@cd $(LMDB_BASE_DIR) && tar -xzf $(notdir $(LMDB_ARCHIVE))
+	@touch $@
+
+# Build LMDB
+$(LMDB_LIB): $(LMDB_EXTRACTED_DIR)
+	@echo "Building LMDB for $(UNAME_SYS) $(UNAME_ARCH)..."
+	$(MAKE) -C $(LMDB_LIB_DIR) liblmdb.a CC=$(CC) \
+		CFLAGS="$(CFLAGS) -DMDB_USE_ROBUST=0" \
+		AR="$(AR)" RANLIB="$(RANLIB)"
+	@if [ -f $(LMDB_LIB) ]; then \
+		echo "✓ LMDB library built successfully: $(LMDB_LIB)"; \
+	else \
+		echo "✗ LMDB library not found at: $(LMDB_LIB)"; \
+		exit 1; \
+	fi
 
 %.o: %.c
 	$(COMPILE_C) $(OUTPUT_OPTION) $<
@@ -92,3 +139,4 @@ $(C_SRC_OUTPUT): $(OBJECTS)
 
 clean:
 	@rm -f $(C_SRC_OUTPUT) $(OBJECTS)
+	@rm -rf $(LMDB_BASE_DIR)
