@@ -6,36 +6,56 @@ BASEDIR := $(abspath $(CURDIR)/..)
 PROJECT ?= $(notdir $(BASEDIR))
 PROJECT := $(strip $(PROJECT))
 
-ERTS_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s/erts-~s/include/\", [code:root_dir(), erlang:system_info(version)]).")
-ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, include)]).")
-ERL_INTERFACE_LIB_DIR ?= $(shell erl -noshell -s init stop -eval "io:format(\"~s\", [code:lib_dir(erl_interface, lib)]).")
+ERTS_INCLUDE_DIR ?= $(shell erl -eval 'io:format("~s", [lists:concat([code:root_dir(), "/erts-", erlang:system_info(version), "/include"])]), halt().' -noshell)
+ERL_INTERFACE_INCLUDE_DIR ?= $(shell erl -eval 'io:format("~s", [code:lib_dir(erl_interface, include)]), halt().' -noshell)
+ERL_INTERFACE_LIB_DIR ?= $(shell erl -eval 'io:format("~s", [code:lib_dir(erl_interface, lib)]), halt().' -noshell)
 
 C_SRC_DIR = $(CURDIR)
 C_SRC_OUTPUT ?= $(CURDIR)/../priv/$(PROJECT).so
 
-# System type and C compiler/flags.
+# Compiler settings
+CC = gcc
+CFLAGS = -fPIC -O2 -std=c99 -finline-functions -Wall -Wmissing-prototypes
+CFLAGS += -I$(ERTS_INCLUDE_DIR) -I$(ERL_INTERFACE_INCLUDE_DIR) -I$(LMDB_LIB_DIR)
 
+# Platform detection
 UNAME_SYS := $(shell uname -s)
+UNAME_ARCH := $(shell uname -m)
+
+# Platform-specific settings
 ifeq ($(UNAME_SYS), Darwin)
-	CC ?= cc
-	CFLAGS ?= -O3 -std=c99 -arch x86_64 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -arch x86_64 -finline-functions -Wall
-	LDFLAGS ?= -arch x86_64 -flat_namespace -undefined suppress
+    # macOS settings
+    LDFLAGS = -bundle -flat_namespace -undefined suppress
+    # Handle both Intel and Apple Silicon
+    ifeq ($(UNAME_ARCH), arm64)
+        CFLAGS += -arch arm64
+        LDFLAGS += -arch arm64
+    else
+        CFLAGS += -arch x86_64
+        LDFLAGS += -arch x86_64
+    endif
+    # macOS specific compiler flags
+    CFLAGS += -mmacosx-version-min=10.14
+    # Use Homebrew paths if available
+    ifneq ($(shell command -v brew 2> /dev/null),)
+        BREW_PREFIX := $(shell brew --prefix)
+        CFLAGS += -I$(BREW_PREFIX)/include
+        LDFLAGS += -L$(BREW_PREFIX)/lib
+    endif
 else ifeq ($(UNAME_SYS), FreeBSD)
-	CC ?= cc
-	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -finline-functions -Wall
-else ifeq ($(UNAME_SYS), Linux)
-	CC ?= gcc
-	CFLAGS ?= -O3 -std=c99 -finline-functions -Wall -Wmissing-prototypes
-	CXXFLAGS ?= -O3 -finline-functions -Wall
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
+else ifeq ($(UNAME_SYS), OpenBSD)
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
+else ifeq ($(UNAME_SYS), NetBSD)
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
+else
+    # Linux and other Unix-like systems
+    LDFLAGS = -shared -fPIC
+    CFLAGS += -fPIC
 endif
-
-CFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR)
-CXXFLAGS += -fPIC -I $(ERTS_INCLUDE_DIR) -I $(ERL_INTERFACE_INCLUDE_DIR)
-
-LDLIBS += -L $(ERL_INTERFACE_LIB_DIR) -lerl_interface -lei
-LDFLAGS += -shared
 
 # Verbosity.
 
