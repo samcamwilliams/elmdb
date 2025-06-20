@@ -287,6 +287,11 @@ static ERL_NIF_TERM ATOM_SET_RANGE;
 
 #define BADARG enif_make_badarg(env)
 
+#define UNLOCKED_CHECK_ENV(elmdb_env)           \
+  if(elmdb_env->shutdown > 0) {                 \
+    return ERR(ATOM_ENV_CLOSED);                \
+  }                                             \
+
 #define CHECK_ENV(elmdb_env)                    \
   if(elmdb_env->shutdown > 0) {                 \
     enif_mutex_unlock(elmdb_env->txn_lock);     \
@@ -1928,7 +1933,7 @@ static ERL_NIF_TERM elmdb_get(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
        enif_inspect_binary(env, argv[1], &key))) {
     return BADARG;
   }
-  LOCKED_CHECK_ENV(elmdb_dbi->elmdb_env);
+  UNLOCKED_CHECK_ENV(elmdb_dbi->elmdb_env);
 
   mkey.mv_size  = key.size;
   mkey.mv_data  = key.data;
