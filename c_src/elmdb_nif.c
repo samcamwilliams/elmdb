@@ -115,6 +115,7 @@ typedef struct {
   char path[MAXPATHLEN];
   uint64_t mapsize;
   unsigned int maxdbs;
+  unsigned int maxreaders;
   unsigned int envflags;
   ErlNifPid caller;
   ERL_NIF_TERM ref;
@@ -180,6 +181,7 @@ static ERL_NIF_TERM ATOM_NORDAHEAD;
 static ERL_NIF_TERM ATOM_NOMEMINIT;
 static ERL_NIF_TERM ATOM_MAPSIZE;
 static ERL_NIF_TERM ATOM_MAXDBS;
+static ERL_NIF_TERM ATOM_MAXREADERS;
 
 static ERL_NIF_TERM ATOM_REVERSEKEY;
 static ERL_NIF_TERM ATOM_DUPSORT;
@@ -457,7 +459,7 @@ static int to_mdb_cursor_op(ErlNifEnv *env, ERL_NIF_TERM op, MDB_val *key) {
   return 0;
 }
 
-static ElmdbEnv* open_env(const char *path, uint64_t mapsize, int maxdbs, int envflags, int *ret) {
+static ElmdbEnv* open_env(const char *path, uint64_t mapsize, int maxdbs, int maxreaders, int envflags, int *ret) {
   ElmdbEnv *elmdb_env;
 
   if((elmdb_env = enif_alloc_resource(elmdb_env_res, sizeof(ElmdbEnv))) == NULL)
@@ -480,6 +482,8 @@ static ElmdbEnv* open_env(const char *path, uint64_t mapsize, int maxdbs, int en
   if((*ret = mdb_env_set_mapsize(elmdb_env->env, mapsize)) != MDB_SUCCESS)
     goto err1;
   if((*ret = mdb_env_set_maxdbs(elmdb_env->env, maxdbs)) != MDB_SUCCESS)
+    goto err1;
+  if((*ret = mdb_env_set_maxreaders(elmdb_env->env, maxreaders)) != MDB_SUCCESS)
     goto err1;
   if((*ret = mdb_env_open(elmdb_env->env, elmdb_env->path, envflags, 0664)) != MDB_SUCCESS)
     goto err2;
@@ -565,7 +569,7 @@ static void* elmdb_env_thread(void *p) {
   OpEntry *q_txn = NULL;
   OpEntry *q_op = NULL;
 
-  if((elmdb_env = open_env(args->path, args->mapsize, args->maxdbs, args->envflags, &ret)) == NULL) {
+  if((elmdb_env = open_env(args->path, args->mapsize, args->maxdbs, args->maxreaders, args->envflags, &ret)) == NULL) {
     SEND_ERRNO(args, ret);
     enif_free_env(args->msg_env);
     return NULL;
@@ -657,9 +661,10 @@ static ElmdbEnv* get_env(ElmdbPriv *priv, const char *path) {
   return NULL;
 }
 
-static int get_env_open_opts(ErlNifEnv *env, ERL_NIF_TERM opts, uint64_t *mapsize, unsigned int *maxdbs, unsigned int *flags) {
+static int get_env_open_opts(ErlNifEnv *env, ERL_NIF_TERM opts, uint64_t *mapsize, unsigned int *maxdbs, unsigned int *maxreaders, unsigned int *flags) {
   uint64_t _mapsize = 1073741824;
   unsigned int _maxdbs = 0;
+  unsigned int _maxreaders = 126;  // LMDB default max readers
   unsigned int _flags = MDB_NOTLS;
   ERL_NIF_TERM head, tail;
   const ERL_NIF_TERM *tup_array;
@@ -698,12 +703,16 @@ static int get_env_open_opts(ErlNifEnv *env, ERL_NIF_TERM opts, uint64_t *mapsiz
         if(enif_is_identical(tup_array[0], ATOM_MAXDBS) != 0 &&
            enif_get_uint(env, tup_array[1], &_maxdbs) == 0)
           return 0;
+        if(enif_is_identical(tup_array[0], ATOM_MAXREADERS) != 0 &&
+           enif_get_uint(env, tup_array[1], &_maxreaders) == 0)
+          return 0;
       } else return 0;
     }
     else return 0;
   }
   *mapsize = _mapsize;
   *maxdbs = _maxdbs;
+  *maxreaders = _maxreaders;
   *flags = _flags;
   return 1;
 }
@@ -759,7 +768,7 @@ static ERL_NIF_TERM elmdb_env_open(ErlNifEnv* env, int argc, const ERL_NIF_TERM 
   if(enif_get_string(env, argv[1], args->path, MAXPATHLEN, ERL_NIF_LATIN1) == 0)
     return BADARG;
 
-  if(get_env_open_opts(env, argv[2], &args->mapsize, &args->maxdbs, &args->envflags) == 0)
+  if(get_env_open_opts(env, argv[2], &args->mapsize, &args->maxdbs, &args->maxreaders, &args->envflags) == 0)
     return BADARG;
 
   args->priv = (ElmdbPriv*)enif_priv_data(env);
@@ -2324,6 +2333,7 @@ static int elmdb_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 
   ATOM_MAPSIZE = enif_make_atom(env, "map_size");
   ATOM_MAXDBS = enif_make_atom(env, "max_dbs");
+  ATOM_MAXREADERS = enif_make_atom(env, "max_readers");
 
   // mdb_db_open flags
   ATOM_REVERSEKEY = enif_make_atom(env, "reverse_key");
