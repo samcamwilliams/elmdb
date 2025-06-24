@@ -122,6 +122,7 @@
 
 -type env_open_opt() :: {map_size, non_neg_integer()} |
                         {max_dbs, non_neg_integer()} |
+                        {max_readers, non_neg_integer()} |
                         fixed_map | no_subdir | read_only |
                         write_map | no_meta_sync | no_sync |
                         map_async | no_read_ahead | no_mem_init.
